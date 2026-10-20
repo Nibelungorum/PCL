@@ -51,10 +51,28 @@ jobs:
 
 
     - name: Replace
+      shell: pwsh
+      env:
+        CLIENT_ID: ${{ secrets.CLIENT_ID }}
+        CF_KEY: ${{ secrets.CF_KEY }}
       run: |
-        (gc "Plain Craft Launcher 2\Modules\ModSecret.vb") -replace 'Public OAuthClientId As String = If(Environment.GetEnvironmentVariable("PCL_MS_CLIENT_ID"), "")', 'Public OAuthClientId As String = If(Environment.GetEnvironmentVariable("PCL_MS_CLIENT_ID"), "${{ secrets.CLIENT_ID }}")' | Out-File "Plain Craft Launcher 2\Modules\ModSecret.vb"
-        (gc "Plain Craft Launcher 2\Modules\ModSecret.vb") -replace 'Public CurseForgeAPIKey As String = If(Environment.GetEnvironmentVariable("PCL_CURSEFORGE_API_KEY"), "")', 'Public CurseForgeAPIKey As String = If(Environment.GetEnvironmentVariable("PCL_CURSEFORGE_API_KEY"), "${{ secrets.CURSEFORGE_API_KEY }}")' | Out-File "Plain Craft Launcher 2\Modules\ModSecret.vb"
-        (gc "Plain Craft Launcher 2\Modules\Base\ModBase.vb") -replace 'Public Const CommitHash As String = ""', 'Public Const CommitHash As String = "${{ github.sha }}"' | Out-File "Plain Craft Launcher 2\Modules\Base\ModBase.vb"
+        $secretPath = "Plain Craft Launcher 2\Modules\ModSecret.vb"
+        $source = Get-Content -LiteralPath $secretPath -Raw
+        foreach ($entry in @(
+          @{ Variable = 'PCL_MS_CLIENT_ID'; Value = $env:CLIENT_ID },
+          @{ Variable = 'PCL_CURSEFORGE_API_KEY'; Value = $env:CF_KEY }
+        )) {
+          if ($entry.Value -match '[\r\n]') { throw 'Build credentials must be single-line values.' }
+          $original = 'Environment.GetEnvironmentVariable("' + $entry.Variable + '"), ""'
+          if (-not $source.Contains($original)) { throw "Credential placeholder not found: $($entry.Variable)" }
+          $replacement = 'Environment.GetEnvironmentVariable("' + $entry.Variable + '"), "' + ([string]$entry.Value).Replace('"', '""') + '"'
+          $source = $source.Replace($original, $replacement)
+        }
+        Set-Content -LiteralPath $secretPath -Value $source -Encoding utf8 -NoNewline
+        $basePath = "Plain Craft Launcher 2\Modules\Base\ModBase.vb"
+        $source = Get-Content -LiteralPath $basePath -Raw
+        $source = $source.Replace('Public Const CommitHash As String = ""', 'Public Const CommitHash As String = "' + $env:GITHUB_SHA + '"')
+        Set-Content -LiteralPath $basePath -Value $source -Encoding utf8 -NoNewline
         
     - name: Restore NuGet Packages
       run: dotnet restore PCLCS\PCLCS.csproj
